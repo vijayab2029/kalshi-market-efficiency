@@ -56,7 +56,7 @@ def compute_complementarity(market: MarketSchema) -> dict:
 
 
 def classify_event_confidence(event: EventSchema) -> dict:
-    strike_types = {m.strike_type for m in event.markets}
+    structures = {m.market_structure for m in event.markets}
 
     if len(event.markets) == 1:
         return {
@@ -66,7 +66,7 @@ def classify_event_confidence(event: EventSchema) -> dict:
             "gap_stats": None,
         }
 
-    if strike_types <= {"less", "between", "greater"}:
+    if structures <= {"less", "between", "greater"}:
         bracket_result = _check_brackets(event.markets)
 
         if bracket_result["exhaustive"] and event.mutually_exclusive:
@@ -109,9 +109,9 @@ def classify_event_confidence(event: EventSchema) -> dict:
 
 
 def _check_brackets(markets: list[MarketSchema]) -> dict:
-    less = [m for m in markets if m.strike_type == "less"]
-    greater = [m for m in markets if m.strike_type == "greater"]
-    between = [m for m in markets if m.strike_type == "between"]
+    less = [m for m in markets if m.market_structure == "less"]
+    greater = [m for m in markets if m.market_structure == "greater"]
+    between = [m for m in markets if m.market_structure == "between"]
 
     if len(less) != 1 or len(greater) != 1:
         one_sided = (greater and not less and not between) or (less and not greater and not between)
