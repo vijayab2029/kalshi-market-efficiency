@@ -13,8 +13,12 @@ class MarketSchema(BaseModel):
     ticker: str
     event_ticker: str
     yes_ask_dollars: Optional[float] = None
+    yes_ask_size_fp: Optional[float] = None
     yes_bid_dollars: Optional[float] = None
+    yes_bid_size_fp: Optional[float] = None
     no_ask_dollars: Optional[float] = None
+    no_ask_size_fp: Optional[float] = None
+    no_bid_dollars: Optional[float] = None
     strike_type: Optional[str] = None
     floor_strike: Optional[float] = None
     cap_strike: Optional[float] = None
@@ -82,3 +86,8 @@ class EventSchema(BaseModel):
     markets: list[MarketSchema]
     category: Optional[str] = None
     title: Optional[str] = None
+
+class SeriesFee(BaseModel):
+    ticker: str
+    fee_multiplier: int
+    fee_type: str

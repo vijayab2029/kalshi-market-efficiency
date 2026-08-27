@@ -1,10 +1,11 @@
-# TODO: Implement fee calculations with the endpoint instead of the flat formula from docs
-# TODO: Add those empirically exhaustive events, and theoretically exhuastive sporting events
+# TODO: Add those empirically exhaustive events and theoretically exhuastive sporting events
+# TODO: Confirm how price is derived currently with the best price in the orderbook
+# TODO: Imperfect docs for fees
+# TODO: Map out the complete depth for inefciencies
 
 from schema import MarketSchema, EventSchema
 from statistics import mean
 from enum import Enum
-
 
 class Exhaustiveness(str, Enum):
     THEORETICAL = "theoretical"
@@ -21,86 +22,87 @@ class Structure(str, Enum):
     OPEN = "open"
 
 
+class MarketSumInefficiencies(str, Enum):
+    OVERROUND = "overround"
+    ARBITRAGE_SUM = "arbitrage_sum"
+
+
 ARBITRAGE_STRUCTURES = (Structure.BRACKET, Structure.SINGLE_BINARY)
 
 
-def compute_overround(markets: list[MarketSchema]) -> dict:
-    total_yes_ask = 0.0
+def compute_event_sum(event: EventSchema) -> dict:
+    if len(event.markets) == 1:
+        market = event.markets[0]
+        yes_ask = market.yes_ask_dollars
+        no_ask = market.no_ask_dollars
+
+        missing_count = sum(1 for side in (yes_ask, no_ask) if side is None)
+        total = 0.0 if missing_count == 2 else (yes_ask or 0.0) + (no_ask or 0.0)
+
+        return {
+            "total": total,
+            "missing_count": missing_count,
+            "market_count": 1,
+            "method": "complementarity",
+        }
+
+    total = 0.0
     missing_count = 0
 
-    for market in markets:
+    for market in event.markets:
         if market.yes_ask_dollars is not None:
-            total_yes_ask += market.yes_ask_dollars
+            total += market.yes_ask_dollars
         else:
             missing_count += 1
 
     return {
-        "total": total_yes_ask,
+        "total": total,
         "missing_count": missing_count,
-        "market_count": len(markets),
+        "market_count": len(event.markets),
         "method": "cross_market_sum",
     }
 
 
-def compute_complementarity(market: MarketSchema) -> dict:
-    yes_ask = market.yes_ask_dollars
-    no_ask = market.no_ask_dollars
-
-    missing_count = sum(1 for side in (yes_ask, no_ask) if side is None)
-
-    if missing_count == 2:
-        total = 0.0
-    else:
-        total = (yes_ask or 0.0) + (no_ask or 0.0)
-
-    return {
-        "total": total,
-        "missing_count": missing_count,
-        "market_count": 1,
-        "method": "complementarity",
-    }
-
-
-def check_arbitrage(market_classification: dict, computation: dict) -> dict:
+def classify_event_sum(computation: dict, market_classification: dict) -> dict:
     structure = market_classification["structure"]
 
     if structure not in ARBITRAGE_STRUCTURES:
         return {
-            "eligible": False,
-            "positive_residual": False,
-            "residual": None,
-            "reason": f"This structure {structure} does not support arbitrage",
-            "fees_applied": False,
+            "sum_inefficiency_type": None,
+            "missing_values": False,
+            "reason": f"{structure} is not mutually exclusive/exhaustive; sum is not meaningful",
+            "total": computation["total"],
+            "missing_count": computation["missing_count"],
+            "market_count": computation["market_count"],
         }
 
     if computation["missing_count"] > 0:
         return {
-            "eligible": False,
-            "positive_residual": False,
-            "residual": None,
-            "reason": "Ineligible: some markets have no ask price",
-            "fees_applied": False,
+            "sum_inefficiency_type": None,
+            "missing_values": True,
+            "reason": "some markets have no ask price",
+            "total": computation["total"],
+            "missing_count": computation["missing_count"],
+            "market_count": computation["market_count"],
         }
-
-    total = computation["total"]
-    residual = 1.0 - total
-
-    if residual <= 0:
+    elif computation["total"] < 1.00:
         return {
-            "eligible": True,
-            "positive_residual": False,
-            "residual": residual,
-            "reason": "no arbitrage; sum of ask prices is more than 1 dollar",
-            "fees_applied": False,
+            "sum_inefficiency_type": MarketSumInefficiencies.ARBITRAGE_SUM,
+            "missing_values": False,
+            "reason": "arbitrage before fees exists; ask sum is less than $1",
+            "total": computation["total"],
+            "missing_count": computation["missing_count"],
+            "market_count": computation["market_count"],
         }
-
-    return {
-        "eligible": True,
-        "positive_residual": True,
-        "residual": residual,
-        "reason": "arbitrage before fees exists, ask sum is less than $1",
-        "fees_applied": False,
-    }
+    else:
+        return {
+            "sum_inefficiency_type": MarketSumInefficiencies.OVERROUND,
+            "missing_values": False,
+            "reason": "no arbitrage; ask sum is at or above $1",
+            "total": computation["total"],
+            "missing_count": computation["missing_count"],
+            "market_count": computation["market_count"],
+        }
 
 
 def check_monotonicity(event: EventSchema, market_classification: dict) -> dict:
@@ -335,4 +337,63 @@ def _check_brackets(markets: list[MarketSchema]) -> dict:
         "gap_stats": gap_stats,
         "date_event": date_event,
         "not_a_ladder": False,
+    }
+
+def compute_spread(market: MarketSchema) -> dict:
+    if market.yes_ask_dollars is None or market.yes_bid_dollars is None:
+        return {
+            "spread": None,
+            "reason": "there is a missing yes_ask or yes_bid",
+        }
+
+    if not market.yes_ask_size_fp or not market.yes_bid_size_fp:
+        return {
+            "spread": None,
+            "reason": "ask or bid size evaluated to zero",
+        }
+
+    spread = market.yes_ask_dollars - market.yes_bid_dollars
+
+    return {
+        "spread": spread,
+        "reason": "all conditions met",
+    }
+
+def evaluate_arbitrage_with_fees(classified_event_sum: dict, event_fees: dict) -> dict:
+    if classified_event_sum["sum_inefficiency_type"] != MarketSumInefficiencies.ARBITRAGE_SUM:
+        return {
+            "survives_before_fees": False,
+            "survives_after_fees": False,
+            "residual": None,
+            "net_residual": None,
+            "reason": "not an arbitrage finding",
+        }
+
+    residual = 1.0 - classified_event_sum["total"]
+    net_residual = residual - event_fees["total_fee"]
+
+    return {
+        "survives_before_fees": True,
+        "survives_after_fees": net_residual > 0,
+        "residual": residual,
+        "net_residual": net_residual,
+        "reason": "arbitrage still exists after fees" if net_residual > 0 else "the arbitrage was erased by fees",
+    }
+
+
+def report_overround_fees(classified_event_sum: dict, event_fees: dict) -> dict:
+    if classified_event_sum["sum_inefficiency_type"] != MarketSumInefficiencies.OVERROUND:
+        return {
+            "cost_before_fees": None,
+            "cost_after_fees": None,
+            "reason": "not an overround finding",
+        }
+
+    cost_before_fees = classified_event_sum["total"]
+    cost_after_fees = cost_before_fees + event_fees["total_fee"]
+
+    return {
+        "cost_before_fees": cost_before_fees,
+        "cost_after_fees": cost_after_fees,
+        "reason": "computed",
     }
