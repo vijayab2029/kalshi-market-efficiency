@@ -78,16 +78,17 @@ class MarketSchema(BaseModel):
         if cap is not None:
             return "less"
         return "custom"
-
-
 class EventSchema(BaseModel):
     event_ticker: str
+    series_ticker: str
     mutually_exclusive: bool
     markets: list[MarketSchema]
     category: Optional[str] = None
     title: Optional[str] = None
+    fee_type_override: Optional[str] = None
+    fee_multiplier_override: Optional[int] = None
 
 class SeriesFee(BaseModel):
     ticker: str
-    fee_multiplier: int
+    fee_multiplier: float
     fee_type: str

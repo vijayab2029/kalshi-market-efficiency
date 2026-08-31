@@ -1,16 +1,21 @@
+import requests
 
 from schema import MarketSchema, EventSchema, SeriesFee
 from statistics import mean
 from enum import Enum
 from decimal import Decimal, ROUND_UP, ROUND_FLOOR
 
+BASE_URL = "https://external-api.kalshi.com/trade-api/v2"
+
 TAKER_RATE = Decimal("0.07")
 CENTICENT = Decimal("0.0001")
 CENT = Decimal("0.01")
+DEFAULT_FEE_MULTIPLIER = 1
 
 
-def compute_taker_fee(price: Decimal, num_contracts: Decimal, fee_multiplier: int) -> Decimal:
-    raw_fee = fee_multiplier * TAKER_RATE * num_contracts * price * (1 - price)
+def compute_taker_fee(price: Decimal, num_contracts: Decimal, fee_multiplier: float) -> Decimal:
+    fee_multiplier_decimal = Decimal(str(fee_multiplier))
+    raw_fee = fee_multiplier_decimal * TAKER_RATE * num_contracts * price * (1 - price)
     return raw_fee.quantize(CENTICENT, rounding=ROUND_UP)
 
 
@@ -48,10 +53,13 @@ def compute_fees(fills: list[dict], fee_multiplier: int) -> dict:
         "total_fee": float(total_fee),
     }
 
+
+#TODO: Consider changing this if adding more advanced depth
+
 def get_best_market_fills(market: MarketSchema) -> dict:
     return {
         "price": market.yes_ask_dollars,
-        "num_contracts": market.yes_ask_size_fp,
+        "num_contracts": 1,
     }
 
 def compute_event_fees(event: EventSchema, fee_multiplier: int) -> dict:
@@ -74,3 +82,43 @@ def compute_event_fees(event: EventSchema, fee_multiplier: int) -> dict:
         "rebate": total_rebate,
         "total_fee": total_fee,
     }
+
+
+def get_series_fee(series_ticker: str) -> SeriesFee:
+    try:
+        response = requests.get(f"{BASE_URL}/series/{series_ticker}")
+    except Exception as e:
+        print(f"Could not fetch series {series_ticker}: {e}")
+        return SeriesFee(
+            ticker=series_ticker,
+            fee_multiplier=DEFAULT_FEE_MULTIPLIER,
+            fee_type="unknown",
+        )
+
+    if response.status_code != 200:
+        print(f"Incorrect status code for series {series_ticker}: {response.status_code}")
+        return SeriesFee(
+            ticker=series_ticker,
+            fee_multiplier=DEFAULT_FEE_MULTIPLIER,
+            fee_type="unknown",
+        )
+
+    data = response.json()["series"]
+    return SeriesFee(
+        ticker=series_ticker,
+        fee_multiplier=data.get("fee_multiplier", DEFAULT_FEE_MULTIPLIER),
+        fee_type=data.get("fee_type", "unknown"),
+    )
+
+def determine_fee_multiplier(event: EventSchema, series_fee_cache: dict) -> int:
+    if event.fee_multiplier_override is not None:
+        return event.fee_multiplier_override
+
+    series_ticker = event.series_ticker
+    if series_ticker in series_fee_cache:
+        series_fee = series_fee_cache[series_ticker]
+    else:
+        series_fee = get_series_fee(series_ticker)
+        series_fee_cache[series_ticker] = series_fee
+
+    return series_fee.fee_multiplier

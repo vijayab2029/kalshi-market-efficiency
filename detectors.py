@@ -280,16 +280,21 @@ def _check_brackets(markets: list[MarketSchema]) -> dict:
     if len(less) != 1 or len(greater) != 1:
         one_sided = (greater and not less and not between) or (less and not greater and not between)
         if one_sided:
+            if greater:
+                gap_stats = check_cumulative_thresholds(greater, lambda m: m.floor_strike)
+            else:
+                gap_stats = check_cumulative_thresholds(less, lambda m: m.effective_cap)
+
             return {
                 "exhaustive": True,
                 "reason": "One-sided ladder, exhaustive but not mutually exclusive",
-                "gap_stats": None,
+                "gap_stats": gap_stats,
                 "date_event": date_event,
                 "not_a_ladder": False,
             }
         return {
             "exhaustive": False,
-            "reason": "missing open-ended bucket",
+            "reason": "ambiguous structure",
             "gap_stats": None,
             "date_event": date_event,
             "not_a_ladder": False,
@@ -329,6 +334,7 @@ def _check_brackets(markets: list[MarketSchema]) -> dict:
         "min": min(gap_list),
         "max": max(gap_list),
         "negative_gap": any(gap < 0 for gap in gap_list),
+        "zero_gap": any(gap == 0 for gap in gap_list),
     }
 
     return {
@@ -396,4 +402,24 @@ def report_overround_fees(classified_event_sum: dict, event_fees: dict) -> dict:
         "cost_before_fees": cost_before_fees,
         "cost_after_fees": cost_after_fees,
         "reason": "computed",
+    }
+
+def check_cumulative_thresholds(thresholds: list[MarketSchema], threshold_of) -> dict | None:
+    usable = [m for m in thresholds if threshold_of(m) is not None]
+    ordered = sorted(usable, key=threshold_of)
+
+    if len(ordered) < 2:
+        return None
+
+    gap_list = [
+        threshold_of(higher) - threshold_of(lower)
+        for lower, higher in zip(ordered, ordered[1:])
+    ]
+
+    return {
+        "mean": mean(gap_list),
+        "min": min(gap_list),
+        "max": max(gap_list),
+        "negative_gap": any(gap < 0 for gap in gap_list),
+        "zero_gap": any(gap == 0 for gap in gap_list),
     }
