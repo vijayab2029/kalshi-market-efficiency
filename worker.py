@@ -26,7 +26,7 @@ def fetch_all_events() -> list[EventSchema]:
 
     while True:
         print(f"LOOP ITER: cursor={cursor!r}, events_so_far={len(events)}")
-        params = {"with_nested_markets": "true", "limit": 100, "status": "open"}
+        params = {"with_nested_markets": "true", "limit": 200, "status": "open"}
         if cursor:
             params["cursor"] = cursor
 
@@ -61,7 +61,7 @@ def fetch_all_events() -> list[EventSchema]:
     return events
 
 
-def process_events(events: list[EventSchema], series_fee_cache: dict) -> list[dict]:
+def process_events(events: list[EventSchema], series_fee_store: dict) -> list[dict]:
     results = []
     series_fee_time = 0.0
     detector_time = 0.0
@@ -80,7 +80,7 @@ def process_events(events: list[EventSchema], series_fee_cache: dict) -> list[di
             detector_time += time.time() - t0
 
             t0 = time.time()
-            fee_multiplier = determine_fee_multiplier(event, series_fee_cache)
+            fee_multiplier = determine_fee_multiplier(event, series_fee_store)
             series_fee_time += time.time() - t0
 
             t0 = time.time()

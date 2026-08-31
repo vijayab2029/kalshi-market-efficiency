@@ -110,15 +110,42 @@ def get_series_fee(series_ticker: str) -> SeriesFee:
         fee_type=data.get("fee_type", "unknown"),
     )
 
-def determine_fee_multiplier(event: EventSchema, series_fee_cache: dict) -> int:
+def determine_fee_multiplier(event: EventSchema, series_fee_store: dict) -> int:
     if event.fee_multiplier_override is not None:
         return event.fee_multiplier_override
 
     series_ticker = event.series_ticker
-    if series_ticker in series_fee_cache:
-        series_fee = series_fee_cache[series_ticker]
+    if series_ticker in series_fee_store:
+        series_fee = series_fee_store[series_ticker]
     else:
         series_fee = get_series_fee(series_ticker)
-        series_fee_cache[series_ticker] = series_fee
+        series_fee_store[series_ticker] = series_fee
 
     return series_fee.fee_multiplier
+
+def fetch_all_series() -> dict[str, SeriesFee]:
+    try:
+        response = requests.get(f"{BASE_URL}/series", timeout=10)
+    except Exception as e:
+        print(f"Failed to fetch series list: {e}")
+        return {}
+
+    if response.status_code != 200:
+        print(f"Wrong status code fetching series list: {response.status_code}")
+        return {}
+
+    data = response.json()
+    series_fee_store = {}
+
+    for entry in data.get("series", []):
+        ticker = entry.get("ticker")
+        if ticker is None:
+            continue
+
+        series_fee_store[ticker] = SeriesFee(
+            ticker=ticker,
+            fee_multiplier=entry.get("fee_multiplier", DEFAULT_FEE_MULTIPLIER),
+            fee_type=entry.get("fee_type", "unknown"),
+        )
+
+    return series_fee_store
