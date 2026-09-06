@@ -1,6 +1,6 @@
 import requests
 
-from schema import MarketSchema, EventSchema, SeriesFee
+from models import MarketSchema, EventSchema, SeriesFee
 from statistics import mean
 from enum import Enum
 from decimal import Decimal, ROUND_UP, ROUND_FLOOR

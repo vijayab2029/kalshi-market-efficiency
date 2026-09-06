@@ -3,7 +3,7 @@
 # TODO: Imperfect docs for fees
 # TODO: Map out the complete depth for inefciencies
 
-from schema import MarketSchema, EventSchema
+from models import MarketSchema, EventSchema
 from statistics import mean
 from enum import Enum
 
@@ -89,7 +89,7 @@ def classify_event_sum(computation: dict, market_classification: dict) -> dict:
         return {
             "sum_inefficiency_type": MarketSumInefficiencies.ARBITRAGE_SUM,
             "missing_values": False,
-            "reason": "arbitrage before fees exists; ask sum is less than $1",
+            "reason": "arbitrage before fees exists",
             "total": computation["total"],
             "missing_count": computation["missing_count"],
             "market_count": computation["market_count"],
@@ -98,7 +98,7 @@ def classify_event_sum(computation: dict, market_classification: dict) -> dict:
         return {
             "sum_inefficiency_type": MarketSumInefficiencies.OVERROUND,
             "missing_values": False,
-            "reason": "no arbitrage; ask sum is at or above $1",
+            "reason": "no arbitrage",
             "total": computation["total"],
             "missing_count": computation["missing_count"],
             "market_count": computation["market_count"],
@@ -211,7 +211,7 @@ def classify_event_confidence(event: EventSchema) -> dict:
             return {
                 "exhaustiveness": Exhaustiveness.THEORETICAL,
                 "structure": Structure.BRACKET,
-                "reason": "Exhaustive set of brackets covering all values",
+                "reason": "Exhaustive brackets covering all values",
                 "gap_stats": bracket_result["gap_stats"],
                 "date_event": bracket_result["date_event"],
             }
@@ -250,7 +250,7 @@ def classify_event_confidence(event: EventSchema) -> dict:
         "date_event": False,
     }
 
-
+#TODO: disovered some date events only have date in yes_sub_title, add parsing for this case later
 def _check_brackets(markets: list[MarketSchema]) -> dict:
     date_event = any(m.strike_date is not None for m in markets)
 
@@ -264,9 +264,9 @@ def _check_brackets(markets: list[MarketSchema]) -> dict:
         return {
             "exhaustive": False,
             "reason": (
-                "all caps identical; shared qualifier, not a ladder"
+                "all caps identical, not a ladder"
                 if caps_all_same
-                else "all floors identical; shared qualifier, not a ladder"
+                else "all floors identical, not a ladder"
             ),
             "gap_stats": None,
             "date_event": date_event,
@@ -401,7 +401,7 @@ def report_overround_fees(classified_event_sum: dict, event_fees: dict) -> dict:
     return {
         "cost_before_fees": cost_before_fees,
         "cost_after_fees": cost_after_fees,
-        "reason": "computed",
+        "reason": "computed amounts",
     }
 
 def check_cumulative_thresholds(thresholds: list[MarketSchema], threshold_of) -> dict | None:

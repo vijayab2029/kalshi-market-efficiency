@@ -1,6 +1,6 @@
 import time
 import requests
-from schema import EventSchema
+from models import EventSchema
 from pydantic import ValidationError
 from fees import compute_event_fees, determine_fee_multiplier
 from detectors import (
