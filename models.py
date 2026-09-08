@@ -19,6 +19,7 @@ class MarketSchema(BaseModel):
     no_ask_dollars: Optional[float] = None
     no_ask_size_fp: Optional[float] = None
     no_bid_dollars: Optional[float] = None
+    volume_24h_fp: Optional[float] = None
     strike_type: Optional[str] = None
     floor_strike: Optional[float] = None
     cap_strike: Optional[float] = None
