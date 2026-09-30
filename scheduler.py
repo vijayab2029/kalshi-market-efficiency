@@ -1,10 +1,12 @@
 import asyncio
 import json
 import os
+import ssl
 import time
 from datetime import datetime, timezone
 
 import aiohttp
+import certifi
 from dotenv import load_dotenv
 from upstash_redis import Redis
 
@@ -49,11 +51,11 @@ async def fetch_all_series(session: aiohttp.ClientSession) -> dict[str, SeriesFe
         timeout = aiohttp.ClientTimeout(total=10)
         async with session.get(f"{BASE_URL}/series", timeout=timeout) as response:
             if response.status != 200:
-                print(f"[fees] Wrong status code fetching series list: {response.status}")
+                print(f"Incorrect status code for getting series list: {response.status}")
                 return {}
             data = await response.json()
     except Exception as e:
-        print(f"[fees] Failed to fetch series list: {e}")
+        print(f"Could not fetch series list: {e}")
         return {}
 
     store = {}
@@ -90,7 +92,9 @@ async def fetch_by_tickers(session: aiohttp.ClientSession, tickers: list[str]) -
             try:
                 events.append(EventSchema(**raw))
             except Exception as e:
-                print(f"  [WARN] Skipped {raw.get('event_ticker', '?')}: {e}")
+                print(f"Skipped {raw.get('event_ticker', '?')}: {e}")
+
+        await asyncio.sleep(0.5)
 
     return events
 
@@ -132,7 +136,7 @@ async def daily_sweep(session: aiohttp.ClientSession) -> dict:
         if not events_raw:
             break
 
-        print(f"  [sweep] page {page_num}: {len(events_raw)} events")
+        print(f"page {page_num}: {len(events_raw)} events")
 
         for raw in events_raw:
             try:
@@ -152,6 +156,7 @@ async def daily_sweep(session: aiohttp.ClientSession) -> dict:
         cursor = data.get("cursor")
         if not cursor:
             break
+        await asyncio.sleep(0.3)
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -166,7 +171,7 @@ def run_cycle(events: list[EventSchema], tier_label: str):
         event_violations = detect_violations(event, series_fee_store)
         all_violations.extend(event_violations)
 
-    summary = update_tracker(all_violations)
+    summary = update_tracker(all_violations, tier_label)
     print(f"[{tier_label}] Tracker: {summary['new']} new, {summary['continued']} continued, "
           f"{summary['closed']} closed, {summary['total_open']} open")
 
@@ -185,12 +190,12 @@ async def hot_loop(session: aiohttp.ClientSession):
             tickers = watch_list["hot"]
             if tickers:
                 events = await fetch_by_tickers(session, tickers)
-                print(f"[hot] Fetched {len(events)} events at {datetime.now(timezone.utc).isoformat()}")
+                print(f"Fetched {len(events)} events - {datetime.now(timezone.utc).isoformat()}")
                 run_cycle(events, "hot")
             else:
-                print("[hot] No hot tickers yet, waiting for first sweep")
+                print("No hot tickers, might be awaiting first sweep")
         except Exception as e:
-            print(f"[hot] Error: {e}")
+            print(f"Error: {e}")
 
         elapsed = time.time() - start
         await asyncio.sleep(max(0, HOT_INTERVAL - elapsed))
@@ -203,12 +208,12 @@ async def cold_loop(session: aiohttp.ClientSession):
             tickers = watch_list["cold"]
             if tickers:
                 events = await fetch_by_tickers(session, tickers)
-                print(f"[cold] Fetched {len(events)} events at {datetime.now(timezone.utc).isoformat()}")
+                print(f"Fetched {len(events)} events at {datetime.now(timezone.utc).isoformat()}")
                 run_cycle(events, "cold")
             else:
-                print("[cold] No cold tickers yet, waiting for first sweep")
+                print("No cold tickers yet, waiting for first sweep")
         except Exception as e:
-            print(f"[cold] Error: {e}")
+            print(f"Error: {e}")
 
         elapsed = time.time() - start
         await asyncio.sleep(max(0, COLD_INTERVAL - elapsed))
@@ -216,6 +221,7 @@ async def cold_loop(session: aiohttp.ClientSession):
 
 async def sweep_loop(session: aiohttp.ClientSession):
     global series_fee_store
+    await asyncio.sleep(SWEEP_INTERVAL)
     while True:
         start = time.time()
         try:
@@ -224,14 +230,14 @@ async def sweep_loop(session: aiohttp.ClientSession):
             updated_fees = await fetch_all_series(session)
             if updated_fees:
                 series_fee_store = updated_fees
-                print(f"[sweep] Refreshed series fees: {len(series_fee_store)} series")
+                print(f"Updated series fees: {len(series_fee_store)} series")
 
             result = await daily_sweep(session)
             watch_list["hot"] = result["hot"]
             watch_list["cold"] = result["cold"]
-            print(f"[sweep] Done. Hot: {len(result['hot'])}, Cold: {len(result['cold'])}")
+            print(f"Completed, Hot: {len(result['hot'])}, Cold: {len(result['cold'])}")
         except Exception as e:
-            print(f"[sweep] Error: {e}")
+            print(f"Error: {e}")
 
         elapsed = time.time() - start
         await asyncio.sleep(max(0, SWEEP_INTERVAL - elapsed))
@@ -239,16 +245,18 @@ async def sweep_loop(session: aiohttp.ClientSession):
 
 async def main():
     global series_fee_store
-    async with aiohttp.ClientSession() as session:
-        print("Fetching series fees...")
+    ssl_context = ssl.create_default_context(cafile=certifi.where())
+    connector = aiohttp.TCPConnector(ssl=ssl_context)
+    async with aiohttp.ClientSession(connector=connector) as session:
+        print("Fetching fees")
         series_fee_store = await fetch_all_series(session)
-        print(f"Loaded {len(series_fee_store)} series fees")
+        print(f"Loaded {len(series_fee_store)} fees")
 
-        print("Running initial sweep...")
+        print("Run sweep")
         result = await daily_sweep(session)
         watch_list["hot"] = result["hot"]
         watch_list["cold"] = result["cold"]
-        print(f"Initial sweep done. Hot: {len(result['hot'])}, Cold: {len(result['cold'])}")
+        print(f"Initial sweep completed,  Hot: {len(result['hot'])}, Cold: {len(result['cold'])}")
 
         await asyncio.gather(
             hot_loop(session),
